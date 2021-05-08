@@ -1,0 +1,5 @@
+*.swp
+data/
+download.log
+cache.pkl
+.DS_Store
