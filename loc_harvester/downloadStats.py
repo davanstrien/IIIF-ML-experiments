@@ -18,32 +18,8 @@ def download(concept):
         term_description = term_description.text
 
         output_filename = 'data/{}.json'.format(term_id)
-
-        if os.path.isfile(output_filename): 
-            with open(output_filename) as json_file:
-                data = json.load(json_file)
-        else:
-            url = "http://www.loc.gov/pictures/search/?fi=subject&{}&op=PHRASE&va=exact&fo=json".format(urllib.parse.urlencode({ 'q': term_description}))
-            req = urllib.request.Request(
-                url, 
-                data=None, 
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36'
-                }
-            )
-            print (url)
-            response = None
-            try:
-                response = urlopen(req, timeout=10)
-            except urllib.error.HTTPError as error:
-                print ('{}: {}'.format(error.code, error.reason))
-                print ('Response: {}'.format(response))
-                raise error
-                
-            data = json.loads(response.read())
-            with open(output_filename, 'w') as outfile:
-                json.dump(data, outfile)
-
+        url = "http://www.loc.gov/pictures/search/?fi=subject&{}&op=PHRASE&va=exact&fo=json".format(urllib.parse.urlencode({ 'q': term_description}))
+        data = openJson(output_filename, url)
         
         print ('{}|{}|{}'.format(term_id, term_description, data["search"]["hits"]))            
         form=False
@@ -70,21 +46,67 @@ def printTableHeader():
 def printRow(row):
     print ("{}|[{}](http://www.loc.gov/pictures/search/?fi=subject&{}&op=PHRASE&va=exact)|{:,}| {:,}".format(row["id"],row["desc"],urllib.parse.urlencode({ 'q': row["desc"]}),row["available"],row["hits"]))
 
-def images(row, df):
+def openJson(filename, url):
+    if os.path.isfile(filename): 
+        #print ("Opening {}".format(filename))
+        with open(filename) as json_file:
+            data = json.load(json_file)
+    else:
+        req = urllib.request.Request(
+            url, 
+            data=None, 
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36'
+            }
+        )
+        #print ("Saving {} to {}".format(url,filename))
+        response = None
+        try:
+            response = urlopen(req, timeout=10)
+        except urllib.error.HTTPError as error:
+            print ('{}: {}'.format(error.code, error.reason))
+            print ('Response: {}'.format(response))
+            raise error
+            
+        data = json.loads(response.read())
+        with open(filename, 'w') as outfile:
+            json.dump(data, outfile)
+
+    return data
+def processResults(data, row, df):
+    for result in data['results']:
+        if 'tile.loc.gov' in result['image']['full']:
+            df = df.append({
+                'id': row['id'],
+                'desc':result['title'],
+                'term':row['desc'],
+                'source': result['links']['item'],
+                'url': result['image']['full']
+            }, ignore_index=True)
+    return df
+
+def images(row, df, maxPages=40):
+    print ("Processing {} Max pages: {}".format(row['id'],maxPages))    
     filename = 'data/{}.json'.format(row['id'])
 
     # ["id", "desc","term", "url"]
     with open(filename) as json_file:
         data = json.load(json_file)
-        for result in data['results']:
-            if 'tile.loc.gov' in result['image']['full']:
-                df = df.append({
-                    'id': row['id'],
-                    'desc':result['title'],
-                    'term':row['desc'],
-                    'source': result['links']['item'],
-                    'url': result['image']['full']
-                }, ignore_index=True)
+        df = processResults(data, row, df)
+
+        # Now get all other pages        
+        numberPages = data["pages"]["total"]
+        query = data["search"]["query"]
+        # skip first page
+        for i in range(2, numberPages):
+            filename = 'data/{}-{}.json'.format(row['id'],i)
+            url = "http://www.loc.gov/pictures/search/?fi=subject&{}&op=PHRASE&va=exact&sp={}&fo=json".format(urllib.parse.urlencode({ 'q': query}),i)
+            data = openJson(filename, url)
+            df = processResults(data,row, df)
+            # keep numbers lower to start off with
+            if i > maxPages:
+                break
+
     return df            
 
 if __name__ == "__main__":
@@ -117,16 +139,20 @@ if __name__ == "__main__":
     printRow(df[df['id'] == 'tgm005206'].to_dict('records')[0])
 
     if len(sys.argv) > 1:
+        maxPages = 20
+        if len(sys.argv) > 2:
+            maxPages = int(sys.argv[2])
         formatSample = pd.DataFrame(columns=["id", "desc","term","source", "url"])
         for row in df[df["format"]==True].sort_values(by="available", ascending=False).head(sum_count).iterrows():
-            formatSample = images(row[1], formatSample)
+            formatSample = images(row[1], formatSample, maxPages)
         print(formatSample.groupby("term").size())    
         formatSample.to_csv('image_by_formats.csv')
 
         subjectSample = pd.DataFrame(columns=["id", "desc","term","source", "url"])
         for row in df[df["format"]==False].sort_values(by="available", ascending=False).head(sum_count).iterrows():
-            subjectSample = images(row[1], subjectSample)
+            subjectSample = images(row[1], subjectSample, maxPages)
 
-        subjectSample = images(df[df['id'] == 'tgm005206'].to_dict('records')[0], subjectSample)
+        # add Hugging
+        subjectSample = images(df[df['id'] == 'tgm005206'].to_dict('records')[0], subjectSample, maxPages)
         print(subjectSample.groupby("term").size())    
         subjectSample.to_csv('image_by_subject.csv')
