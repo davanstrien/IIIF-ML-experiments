@@ -1,1 +1,1 @@
-# people-iiif
+# IIIF + ML Experiments 
