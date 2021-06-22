@@ -16,3 +16,5 @@ This is all very much work in progress.
 - [loc_harvester](loc_harvester) contains code for getting data from the Library of congress 
 
 - [data/europeana/example_data/data/edm/](data/europeana/example_data/data/edm/) cotains example European data
+
+- Various `.ipynb` notebook files contain WIP experiments/baselines for training models 
